@@ -9,8 +9,8 @@
 
 set -euo pipefail
 
-# 環境変数チェック
-if [ -z "${CCSTATS_URL:-}" ] || [ -z "${CF_ACCESS_CLIENT_ID:-}" ] || [ -z "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+# CCSTATS_URL は必須、CF Access ヘッダーは任意
+if [ -z "${CCSTATS_URL:-}" ]; then
   exit 0
 fi
 
@@ -82,13 +82,19 @@ if [ -z "$PARSED_CWD" ]; then
   STATS=$(echo "$STATS" | jq --arg cwd "$CWD" '.cwd = $cwd')
 fi
 
+# CF Access ヘッダーを組み立て (設定されている場合のみ)
+CF_HEADERS=()
+if [ -n "${CF_ACCESS_CLIENT_ID:-}" ] && [ -n "${CF_ACCESS_CLIENT_SECRET:-}" ]; then
+  CF_HEADERS+=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID")
+  CF_HEADERS+=(-H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+fi
+
 # API に送信 (タイムアウト10秒、リトライ2回)
 HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
   --max-time 10 --retry 2 --retry-delay 1 \
   -X POST "$CCSTATS_URL" \
   -H "Content-Type: application/json" \
-  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+  "${CF_HEADERS[@]+"${CF_HEADERS[@]}"}" \
   -d "$STATS" 2>/dev/null || echo "000")
 
 if [ "$HTTP_CODE" -lt 200 ] 2>/dev/null || [ "$HTTP_CODE" -ge 300 ] 2>/dev/null; then
