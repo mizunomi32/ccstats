@@ -1,4 +1,3 @@
-import { vi } from "vitest";
 import type { D1Database, D1PreparedStatement, D1Result } from "@cloudflare/workers-types";
 
 /**
@@ -18,7 +17,7 @@ export function createMockD1(): MockD1 {
   const mockFirstResults = new Map<string, unknown>();
   const batchCalls: unknown[][] = [];
 
-  const createMockStatement = (sql: string, boundValues: unknown[] = []): D1PreparedStatement => {
+  const createMockStatement = (sql: string, _boundValues: unknown[] = []): D1PreparedStatement => {
     const stmt: D1PreparedStatement = {
       bind(...values: unknown[]) {
         return createMockStatement(sql, values);
@@ -88,7 +87,7 @@ export function createMockD1(): MockD1 {
     async dump(): Promise<ArrayBuffer> {
       return new ArrayBuffer(0);
     },
-    async exec(query: string): Promise<D1Result<unknown>> {
+    async exec(_query: string): Promise<D1Result<unknown>> {
       return {
         results: [],
         success: true,

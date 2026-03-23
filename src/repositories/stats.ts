@@ -104,6 +104,8 @@ export class StatsRepository {
       case "monthly":
         dateExpr = "strftime('%Y-%m', started_at)";
         break;
+      default:
+        throw new Error(`Unexpected granularity: ${granularity satisfies never}`);
     }
 
     const result = await this.db

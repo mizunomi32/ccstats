@@ -10,7 +10,8 @@ export class SessionRepository {
     const id = ulid();
     const now = new Date().toISOString();
 
-    await this.db
+    // sessions + tool_calls を単一 batch でアトミックに INSERT
+    const sessionStmt = this.db
       .prepare(
         `INSERT INTO sessions (id, session_id, cwd, git_branch, claude_version, model,
          input_tokens, output_tokens, cache_read_tokens, duration_seconds,
@@ -31,21 +32,18 @@ export class SessionRepository {
         data.started_at,
         data.ended_at,
         now
-      )
-      .run();
+      );
 
-    // ツール呼び出しを一括INSERT
-    if (data.tool_calls.length > 0) {
-      const stmt = this.db.prepare(
-        `INSERT OR REPLACE INTO tool_calls (session_id, tool_name, call_count)
-         VALUES (?, ?, ?)`
-      );
-      await this.db.batch(
-        data.tool_calls.map((tc) =>
-          stmt.bind(data.session_id, tc.tool_name, tc.call_count)
+    const toolStmts = data.tool_calls.map((tc) =>
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO tool_calls (session_id, tool_name, call_count)
+           VALUES (?, ?, ?)`
         )
-      );
-    }
+        .bind(data.session_id, tc.tool_name, tc.call_count)
+    );
+
+    await this.db.batch([sessionStmt, ...toolStmts]);
 
     return {
       id,

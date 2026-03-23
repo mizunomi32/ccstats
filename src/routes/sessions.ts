@@ -9,7 +9,12 @@ const sessions = new Hono<{ Bindings: Env }>();
 
 // POST /api/sessions — Hook からのデータ受信
 sessions.post("/", async (c) => {
-  const body = await c.req.json();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Bad Request", message: "Invalid JSON" }, 400);
+  }
   const parsed = CreateSessionSchema.safeParse(body);
 
   if (!parsed.success) {
@@ -51,7 +56,7 @@ sessions.get("/", async (c) => {
   const to = c.req.query("to") ?? defaultTo();
   const cwd = c.req.query("cwd");
   const limit = clampLimit(Number(c.req.query("limit")) || undefined, MAX_LIMIT);
-  const offset = Number(c.req.query("offset")) || 0;
+  const offset = Math.max(0, Number(c.req.query("offset")) || 0);
 
   const repo = new SessionRepository(c.env.DB);
   const result = await repo.list({ from, to, cwd, limit, offset });

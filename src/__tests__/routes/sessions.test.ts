@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Hono } from "hono";
+import type { D1PreparedStatement } from "@cloudflare/workers-types";
 import type { Env } from "../../index";
 import sessions from "../../routes/sessions";
 import { createMockD1, validSessionPayload } from "../helpers/mock-d1";
@@ -74,27 +75,15 @@ describe("POST /api/sessions", () => {
   });
 
   it("重複session_idで409を返す", async () => {
-    // D1のrun()がUNIQUE制約エラーを投げるようにモック
-    const originalPrepare = mockDb.prepare.bind(mockDb);
-    let callCount = 0;
-    mockDb.prepare = (sql: string) => {
-      const stmt = originalPrepare(sql);
-      if (sql.includes("INSERT INTO sessions")) {
-        const originalRun = stmt.run.bind(stmt);
-        const originalBind = stmt.bind.bind(stmt);
-        stmt.bind = (...args: unknown[]) => {
-          const bound = originalBind(...args);
-          bound.run = async () => {
-            callCount++;
-            if (callCount > 1) {
-              throw new Error("UNIQUE constraint failed: sessions.session_id");
-            }
-            return originalRun();
-          };
-          return bound;
-        };
+    // batch()がUNIQUE制約エラーを投げるようにモック
+    const originalBatch = mockDb.batch.bind(mockDb);
+    let batchCallCount = 0;
+    mockDb.batch = async (stmts: unknown[]) => {
+      batchCallCount++;
+      if (batchCallCount > 1) {
+        throw new Error("UNIQUE constraint failed: sessions.session_id");
       }
-      return stmt;
+      return originalBatch(stmts as D1PreparedStatement[]);
     };
 
     const payload = validSessionPayload({ session_id: "dup-session" });

@@ -25,6 +25,7 @@ if [ -z "$SESSION_ID" ] || [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH
 fi
 
 # transcript JSONL を解析
+JQ_ERROR_LOG="${TMPDIR:-/tmp}/ccstats-jq-error.log"
 STATS=$(jq -s '
   # 最初のエントリからメタ情報を取得
   (.[0] // {}) as $first |
@@ -60,9 +61,12 @@ STATS=$(jq -s '
     else
       .duration_seconds = null
     end
-' "$TRANSCRIPT_PATH" 2>/dev/null)
+' "$TRANSCRIPT_PATH" 2>"$JQ_ERROR_LOG")
 
 if [ -z "$STATS" ] || [ "$STATS" = "null" ]; then
+  if [ -s "$JQ_ERROR_LOG" ]; then
+    logger -t ccstats "jq parse failed for $TRANSCRIPT_PATH: $(cat "$JQ_ERROR_LOG")" 2>/dev/null || true
+  fi
   exit 0
 fi
 
@@ -78,12 +82,19 @@ if [ -z "$PARSED_CWD" ]; then
   STATS=$(echo "$STATS" | jq --arg cwd "$CWD" '.cwd = $cwd')
 fi
 
-# API に送信
-curl -s -o /dev/null -w '' \
+# API に送信 (タイムアウト10秒、リトライ2回)
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+  --max-time 10 --retry 2 --retry-delay 1 \
   -X POST "$CCSTATS_URL" \
   -H "Content-Type: application/json" \
   -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-  -d "$STATS" &
+  -d "$STATS" 2>/dev/null || echo "000")
+
+if [ "$HTTP_CODE" -lt 200 ] 2>/dev/null || [ "$HTTP_CODE" -ge 300 ] 2>/dev/null; then
+  # 送信失敗時はローカルにフォールバック保存
+  echo "$STATS" >> "${HOME}/.ccstats-failed.jsonl"
+  logger -t ccstats "API POST failed (HTTP $HTTP_CODE)" 2>/dev/null || true
+fi
 
 exit 0

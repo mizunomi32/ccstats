@@ -176,8 +176,16 @@ export function renderDashboard(): string {
       return cwd.split('/').filter(Boolean).pop() || cwd;
     }
 
+    function esc(s) {
+      if (s == null) return '';
+      const d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    }
+
     async function fetchJSON(path) {
       const res = await fetch(path);
+      if (!res.ok) throw new Error('API error: ' + res.status);
       return res.json();
     }
 
@@ -186,12 +194,19 @@ export function renderDashboard(): string {
       const { from, to } = dateRange(days);
       const q = 'from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
 
-      const [summary, tokens, tools, sessions] = await Promise.all([
+      let summary, tokens, tools, sessions;
+      try {
+        [summary, tokens, tools, sessions] = await Promise.all([
         fetchJSON('/api/stats/summary?' + q),
         fetchJSON('/api/stats/tokens?' + q + '&granularity=daily'),
         fetchJSON('/api/stats/tools?' + q),
         fetchJSON('/api/sessions?' + q + '&limit=20'),
       ]);
+      } catch (e) {
+        document.getElementById('cards').innerHTML =
+          '<div class="card" style="grid-column:1/-1;text-align:center;color:var(--danger)">Failed to load data: ' + esc(e.message) + '</div>';
+        return;
+      }
 
       // Cards
       const totalTokens = summary.total_input_tokens + summary.total_output_tokens;
@@ -223,13 +238,13 @@ export function renderDashboard(): string {
         const d = new Date(s.started_at);
         const dateStr = d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         return '<tr>' +
-          '<td>' + dateStr + '</td>' +
-          '<td>' + projectName(s.cwd) + '</td>' +
-          '<td>' + (s.git_branch || '-') + '</td>' +
-          '<td>' + (s.model || '-') + '</td>' +
-          '<td>' + fmt(s.total_tokens) + '</td>' +
-          '<td>$' + cost(s.input_tokens, s.output_tokens, s.cache_read_tokens) + '</td>' +
-          '<td>' + duration(s.duration_seconds) + '</td>' +
+          '<td>' + esc(dateStr) + '</td>' +
+          '<td>' + esc(projectName(s.cwd)) + '</td>' +
+          '<td>' + esc(s.git_branch || '-') + '</td>' +
+          '<td>' + esc(s.model || '-') + '</td>' +
+          '<td>' + esc(fmt(s.total_tokens)) + '</td>' +
+          '<td>$' + esc(cost(s.input_tokens, s.output_tokens, s.cache_read_tokens)) + '</td>' +
+          '<td>' + esc(duration(s.duration_seconds)) + '</td>' +
           '</tr>';
       }).join('');
     }

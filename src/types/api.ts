@@ -1,24 +1,25 @@
 import { z } from "zod";
 
 export const CreateSessionSchema = z.object({
-  session_id: z.string().min(1),
-  cwd: z.string().min(1),
-  git_branch: z.string().nullish(),
-  claude_version: z.string().nullish(),
-  model: z.string().nullish(),
-  input_tokens: z.number().int().min(0),
-  output_tokens: z.number().int().min(0),
-  cache_read_tokens: z.number().int().min(0).default(0),
-  duration_seconds: z.number().int().min(0).nullish(),
-  started_at: z.string().min(1),
-  ended_at: z.string().min(1),
+  session_id: z.string().min(1).max(128),
+  cwd: z.string().min(1).max(1024),
+  git_branch: z.string().max(256).nullish(),
+  claude_version: z.string().max(64).nullish(),
+  model: z.string().max(128).nullish(),
+  input_tokens: z.number().int().min(0).max(100_000_000),
+  output_tokens: z.number().int().min(0).max(100_000_000),
+  cache_read_tokens: z.number().int().min(0).max(100_000_000).default(0),
+  duration_seconds: z.number().int().min(0).max(86400).nullish(),
+  started_at: z.string().datetime({ offset: true }),
+  ended_at: z.string().datetime({ offset: true }),
   tool_calls: z
     .array(
       z.object({
-        tool_name: z.string().min(1),
-        call_count: z.number().int().min(0),
+        tool_name: z.string().min(1).max(128),
+        call_count: z.number().int().min(0).max(1_000_000),
       })
     )
+    .max(200)
     .default([]),
 });
 
