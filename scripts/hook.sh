@@ -42,8 +42,16 @@ STATS=$(jq -s '
   # assistant メッセージからモデル名を取得
   [$entries[] | select(.type == "assistant" and .message.model != null) | .message.model] as $models |
 
-  # tool_use エントリをカウント
-  [$entries[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name] as $tools |
+  # tool_use エントリをカウント (Agent/Skill はサブタイプを展開)
+  [$entries[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") |
+    if .name == "Agent" then
+      "Agent:" + (.input.subagent_type // "unknown")
+    elif .name == "Skill" then
+      "Skill:" + (.input.skill // "unknown")
+    else
+      .name
+    end
+  ] as $tools |
 
   # タイムスタンプの min/max
   [$entries[] | .timestamp | select(. != null)] as $timestamps |

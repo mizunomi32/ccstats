@@ -119,6 +119,13 @@ export function renderDashboard(): string {
       </div>
     </div>
 
+    <div class="charts">
+      <div class="chart-box">
+        <h3>Agents &amp; Skills</h3>
+        <canvas id="agentChart"></canvas>
+      </div>
+    </div>
+
     <div class="table-box">
       <h3>Recent Sessions</h3>
       <table>
@@ -147,8 +154,12 @@ export function renderDashboard(): string {
       cache: ${COST_PER_CACHE_TOKEN},
     };
 
-    let tokenChart, toolChart;
+    let tokenChart, toolChart, agentChart;
     let currentRange = 1;
+
+    function isAgentOrSkill(name) {
+      return name.startsWith('Agent:') || name.startsWith('Skill:') || name.startsWith('mcp__');
+    }
 
     function dateRange(days) {
       const to = new Date().toISOString();
@@ -225,8 +236,13 @@ export function renderDashboard(): string {
       // Token Chart
       renderTokenChart(tokens.data);
 
-      // Tool Chart
-      renderToolChart(tools.tools.slice(0, 10));
+      // Tool Chart (基本ツールのみ: Agent/Skill/MCP を除外)
+      const basicTools = tools.tools.filter(t => !isAgentOrSkill(t.tool_name)).slice(0, 10);
+      renderToolChart(basicTools);
+
+      // Agents & Skills Chart
+      const agentTools = tools.tools.filter(t => isAgentOrSkill(t.tool_name));
+      renderAgentChart(agentTools);
 
       // Sessions Table
       const tbody = document.getElementById('sessionsBody');
@@ -289,6 +305,36 @@ export function renderDashboard(): string {
             label: 'Calls',
             data: tools.map(t => t.total_calls),
             backgroundColor: '#818cf8',
+          }],
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+            y: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+          },
+        },
+      });
+    }
+
+    function renderAgentChart(tools) {
+      const ctx = document.getElementById('agentChart');
+      if (agentChart) agentChart.destroy();
+      if (tools.length === 0) {
+        ctx.parentElement.style.display = 'none';
+        return;
+      }
+      ctx.parentElement.style.display = '';
+      agentChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: tools.map(t => t.tool_name),
+          datasets: [{
+            label: 'Calls',
+            data: tools.map(t => t.total_calls),
+            backgroundColor: '#34d399',
           }],
         },
         options: {
