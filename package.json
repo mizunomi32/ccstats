@@ -1,0 +1,31 @@
+{
+  "name": "ccstats",
+  "version": "1.0.0",
+  "description": "Claude Code の利用状況を集計・可視化するアプリケーション。",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute ccstats-db --local --file=src/db/schema.sql",
+    "db:migrate": "wrangler d1 execute ccstats-db --file=src/db/schema.sql",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.12.9",
+    "ulid": "^3.0.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.13.3",
+    "@cloudflare/workers-types": "^4.20260317.1",
+    "@vitest/coverage-v8": "^4.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.76.0"
+  }
+}
