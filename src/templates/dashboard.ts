@@ -121,8 +121,19 @@ export function renderDashboard(): string {
 
     <div class="charts">
       <div class="chart-box">
-        <h3>Agents &amp; Skills</h3>
+        <h3>Agents</h3>
         <canvas id="agentChart"></canvas>
+      </div>
+      <div class="chart-box">
+        <h3>Skills</h3>
+        <canvas id="skillChart"></canvas>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="chart-box">
+        <h3>MCP Tools</h3>
+        <canvas id="mcpChart"></canvas>
       </div>
     </div>
 
@@ -154,10 +165,10 @@ export function renderDashboard(): string {
       cache: ${COST_PER_CACHE_TOKEN},
     };
 
-    let tokenChart, toolChart, agentChart;
+    let tokenChart, toolChart, agentChart, skillChart, mcpChart;
     let currentRange = 1;
 
-    function isAgentOrSkill(name) {
+    function isSpecial(name) {
       return name.startsWith('Agent:') || name.startsWith('Skill:') || name.startsWith('mcp__');
     }
 
@@ -236,13 +247,20 @@ export function renderDashboard(): string {
       // Token Chart
       renderTokenChart(tokens.data);
 
-      // Tool Chart (基本ツールのみ: Agent/Skill/MCP を除外)
-      const basicTools = tools.tools.filter(t => !isAgentOrSkill(t.tool_name)).slice(0, 10);
+      // Tool Chart (基本ツールのみ)
+      const basicTools = tools.tools.filter(t => !isSpecial(t.tool_name)).slice(0, 10);
       renderToolChart(basicTools);
 
-      // Agents & Skills Chart
-      const agentTools = tools.tools.filter(t => isAgentOrSkill(t.tool_name));
-      renderAgentChart(agentTools);
+      // Agent / Skill / MCP を分類して表示
+      const agents = tools.tools.filter(t => t.tool_name.startsWith('Agent:'))
+        .map(t => ({...t, tool_name: t.tool_name.replace('Agent:', '')}));
+      const skills = tools.tools.filter(t => t.tool_name.startsWith('Skill:'))
+        .map(t => ({...t, tool_name: t.tool_name.replace('Skill:', '')}));
+      const mcps = tools.tools.filter(t => t.tool_name.startsWith('mcp__'))
+        .map(t => ({...t, tool_name: t.tool_name.replace(/^mcp__(?:plugin_[^_]+_)?/, '')}));
+      renderCategoryChart('agentChart', agentChart, agents, '#818cf8', c => agentChart = c);
+      renderCategoryChart('skillChart', skillChart, skills, '#34d399', c => skillChart = c);
+      renderCategoryChart('mcpChart', mcpChart, mcps, '#fb923c', c => mcpChart = c);
 
       // Sessions Table
       const tbody = document.getElementById('sessionsBody');
@@ -319,22 +337,23 @@ export function renderDashboard(): string {
       });
     }
 
-    function renderAgentChart(tools) {
-      const ctx = document.getElementById('agentChart');
-      if (agentChart) agentChart.destroy();
+    function renderCategoryChart(canvasId, chartInstance, tools, color, setter) {
+      const ctx = document.getElementById(canvasId);
+      if (chartInstance) chartInstance.destroy();
       if (tools.length === 0) {
         ctx.parentElement.style.display = 'none';
+        setter(null);
         return;
       }
       ctx.parentElement.style.display = '';
-      agentChart = new Chart(ctx, {
+      setter(new Chart(ctx, {
         type: 'bar',
         data: {
           labels: tools.map(t => t.tool_name),
           datasets: [{
             label: 'Calls',
             data: tools.map(t => t.total_calls),
-            backgroundColor: '#34d399',
+            backgroundColor: color,
           }],
         },
         options: {
@@ -343,10 +362,10 @@ export function renderDashboard(): string {
           plugins: { legend: { display: false } },
           scales: {
             x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
-            y: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+            y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } },
           },
         },
-      });
+      }));
     }
 
     // Filter buttons
