@@ -1,8 +1,9 @@
 name = "ccstats"
 main = "src/index.ts"
 compatibility_date = "2026-03-01"
+account_id = "<your-account-id>"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "ccstats-db"
-database_id = "placeholder-replace-after-d1-create"
+database_id = "<your-database-id>"
