@@ -25,39 +25,50 @@ if [ -z "$SESSION_ID" ] || [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH
 fi
 
 # transcript JSONL を解析
+# 構造: 各行に type (assistant/user/progress/system 等) がある
+# assistant 行: .message.role, .message.content[], .message.usage, .message.model
+# メタ情報: .sessionId, .cwd, .gitBranch, .version, .timestamp
 JQ_ERROR_LOG="${TMPDIR:-/tmp}/ccstats-jq-error.log"
 STATS=$(jq -s '
+  # assistant/user エントリのみ対象（progress等を除外）
+  [.[] | select(.type == "assistant" or .type == "user")] as $entries |
+
   # 最初のエントリからメタ情報を取得
-  (.[0] // {}) as $first |
+  ($entries[0] // {}) as $first |
 
   # assistant メッセージの usage を合算
-  [.[] | select(.message.role == "assistant" and .message.usage != null) | .message.usage] as $usages |
+  [$entries[] | select(.type == "assistant" and .message.usage != null) | .message.usage] as $usages |
+
+  # assistant メッセージからモデル名を取得
+  [$entries[] | select(.type == "assistant" and .message.model != null) | .message.model] as $models |
 
   # tool_use エントリをカウント
-  [.[] | select(.message.role == "assistant") | .message.content[]? | select(.type == "tool_use") | .name] as $tools |
+  [$entries[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use") | .name] as $tools |
 
   # タイムスタンプの min/max
-  [.[] | .timestamp // empty | select(. != null)] as $timestamps |
+  [$entries[] | .timestamp | select(. != null)] as $timestamps |
 
   {
     session_id: ($first.sessionId // ""),
     cwd: ($first.cwd // ""),
     git_branch: ($first.gitBranch // null),
     claude_version: ($first.version // null),
-    model: ([$usages[].model_id // empty] | last // null),
-    input_tokens: ([$usages[].input_tokens // 0] | add // 0),
-    output_tokens: ([$usages[].output_tokens // 0] | add // 0),
-    cache_read_tokens: ([$usages[].cache_read_input_tokens // 0] | add // 0),
+    model: ($models | last // null),
+    input_tokens: ([$usages[] | .input_tokens // 0] | add // 0),
+    output_tokens: ([$usages[] | .output_tokens // 0] | add // 0),
+    cache_read_tokens: ([$usages[] | .cache_read_input_tokens // 0] | add // 0),
     started_at: ($timestamps | min // null),
     ended_at: ($timestamps | max // null),
     tool_calls: (
-      $tools | group_by(.) | map({tool_name: .[0], call_count: length})
+      if ($tools | length) > 0 then
+        $tools | group_by(.) | map({tool_name: .[0], call_count: length})
+      else [] end
     )
   }
 
-  # duration を計算
+  # duration を計算 (ミリ秒付きISO 8601対応: .000Z を除去)
   | if .started_at and .ended_at then
-      .duration_seconds = ((.ended_at | fromdateiso8601) - (.started_at | fromdateiso8601) | floor)
+      .duration_seconds = (((.ended_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) - (.started_at | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)) | floor)
     else
       .duration_seconds = null
     end
