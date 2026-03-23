@@ -33,40 +33,39 @@ Cloudflare D1 (SQLite)
 | 認証 | Cloudflare Access (サービストークン + ブラウザフロー) |
 | ダッシュボード | SSR HTML + Chart.js (CDN) |
 | バリデーション | Zod |
-| テスト | Vitest + Miniflare |
+| テスト | Vitest (カバレッジ 95%+) |
+| CI/CD | GitHub Actions → Cloudflare Workers |
 
 ## ディレクトリ構成
 
 ```
 ccstats/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml           # CI/CD (テスト → デプロイ)
 ├── src/
-│   ├── index.ts                 # エントリポイント
+│   ├── index.ts                 # エントリポイント (Hono + secureHeaders + CORS)
 │   ├── routes/
-│   │   ├── api.ts               # API ルートグループ (/api/*)
 │   │   ├── sessions.ts          # POST/GET /api/sessions
 │   │   ├── stats.ts             # GET /api/stats/*
 │   │   └── dashboard.ts         # GET / (ダッシュボード)
-│   ├── middleware/
-│   │   ├── auth.ts              # CF Access 検証
-│   │   └── validation.ts        # Zod バリデーション
 │   ├── repositories/
 │   │   ├── session.ts           # sessions テーブルクエリ
 │   │   └── stats.ts             # 集計クエリ
-│   ├── services/
-│   │   └── stats.ts             # 集計ロジック
 │   ├── templates/
 │   │   └── dashboard.ts         # ダッシュボード HTML テンプレート
 │   ├── types/
-│   │   ├── api.ts               # API 型定義
-│   │   └── db.ts                # DB 型定義
+│   │   ├── api.ts               # Zod スキーマ + API 型定義
+│   │   └── db.ts                # DB 行型定義
 │   ├── lib/
 │   │   ├── constants.ts         # 定数 (コスト単価等)
 │   │   └── utils.ts             # ユーティリティ
-│   └── db/
-│       └── schema.sql           # D1 スキーマ
+│   ├── db/
+│   │   └── schema.sql           # D1 スキーマ
+│   └── __tests__/               # テスト (76件)
 ├── scripts/
 │   └── hook.sh                  # Claude Code Stop Hook スクリプト
-├── wrangler.toml
+├── wrangler.example.toml        # Wrangler 設定テンプレート
 ├── package.json
 ├── tsconfig.json
 └── vitest.config.ts
@@ -98,8 +97,17 @@ ccstats/
 |-------|-----|------|
 | id | INTEGER (PK) | 自動採番 |
 | session_id | TEXT (FK) | sessions.session_id |
-| tool_name | TEXT | ツール名 (Read, Write, Bash 等) |
+| tool_name | TEXT | ツール名 (下記参照) |
 | call_count | INTEGER | 呼び出し回数 |
+
+#### tool_name の命名規則
+
+| カテゴリ | 形式 | 例 |
+|---------|------|-----|
+| 基本ツール | そのまま | `Read`, `Edit`, `Bash`, `Write`, `Glob` |
+| Agent | `Agent:<type>` | `Agent:Explore`, `Agent:security-reviewer` |
+| Skill | `Skill:<name>` | `Skill:commit`, `Skill:security-qa` |
+| MCP | `mcp__<server>__<method>` | `mcp__serena__find_symbol`, `mcp__github__create_pull_request` |
 
 ## API エンドポイント
 
@@ -130,8 +138,9 @@ ccstats/
   "ended_at": "2026-03-23T10:20:00Z",
   "tool_calls": [
     { "tool_name": "Read", "call_count": 15 },
-    { "tool_name": "Edit", "call_count": 8 },
-    { "tool_name": "Bash", "call_count": 3 }
+    { "tool_name": "Agent:Explore", "call_count": 2 },
+    { "tool_name": "Skill:commit", "call_count": 1 },
+    { "tool_name": "mcp__serena__find_symbol", "call_count": 5 }
   ]
 }
 ```
@@ -148,56 +157,114 @@ ccstats/
 
 ### グラフ
 
-- トークン使用量推移（積み上げ棒グラフ: input / output / cache）
-- セッション数推移（折れ線グラフ）
-- ツール利用分布（横棒グラフ: 上位10ツール）
-- プロジェクト別使用量（横棒グラフ）
+- **Token Usage** — トークン使用量推移（積み上げ棒グラフ: input / output / cache）
+- **Top Tools** — 基本ツール利用分布（横棒グラフ: Read, Edit, Bash 等）
+- **Agents** — Agent 呼び出し分布（横棒グラフ: Explore, Plan 等）
+- **Skills** — Skill 呼び出し分布（横棒グラフ: commit, security-qa 等）
+- **MCP Tools** — MCP ツール呼び出し分布（横棒グラフ: serena, github 等）
 
 ### フィルター
 
-- 期間: 今日 / 過去7日 / 過去30日 / 今月 / カスタム
-- プロジェクト: cwd によるフィルタ
+- 期間: Today / 7 Days / 30 Days / 90 Days
+
+### 直近セッション一覧
+
+日時、プロジェクト、ブランチ、モデル、トークン数、コスト概算、セッション時間を表示。
 
 ## 認証
 
-Cloudflare Access で全エンドポイントを保護する。
+Cloudflare Access で全エンドポイントを保護する。アプリケーション内に認証ロジックはなく、CF Access が前段で処理する。
 
 | 用途 | 方式 |
 |------|------|
 | Hook → API | CF Access サービストークン (`CF-Access-Client-Id` / `CF-Access-Client-Secret`) |
 | ブラウザ → ダッシュボード | CF Access ブラウザフロー (OTP / OAuth) |
 
+## セットアップ
+
+### 前提条件
+
+- Node.js 22+
+- Cloudflare アカウント
+- wrangler CLI (`npm install -g wrangler`)
+
+### 1. リポジトリのクローンと依存インストール
+
+```bash
+git clone git@github.com:mizunomi32/ccstats.git
+cd ccstats
+npm install
+```
+
+### 2. Wrangler 設定
+
+```bash
+cp wrangler.example.toml wrangler.toml
+# wrangler.toml の account_id と database_id を自分の値に書き換える
+```
+
+### 3. D1 データベース作成
+
+```bash
+wrangler login
+npx wrangler d1 create ccstats-db
+# 出力された database_id を wrangler.toml に設定
+
+npx wrangler d1 execute ccstats-db --remote --file=src/db/schema.sql
+```
+
+### 4. ローカル開発
+
+```bash
+npm run db:migrate:local
+npm run dev
+```
+
+### 5. デプロイ
+
+```bash
+npm run deploy
+```
+
+### 6. Cloudflare Access 設定
+
+1. Cloudflare Zero Trust ダッシュボードで Application を作成
+2. ドメインに Workers の URL を設定
+3. サービストークンを作成（Hook 用 M2M 認証）
+4. ポリシーを設定:
+   - Service Auth: Hook スクリプト用
+   - Email: ダッシュボード閲覧用
+
+### 7. GitHub Actions (CI/CD)
+
+main ブランチへの Push で自動テスト → デプロイが実行される。
+
+以下のシークレットをリポジトリの Settings → Secrets に登録:
+
+| シークレット名 | 説明 |
+|---------------|------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API トークン (Edit Workers 権限) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare アカウント ID |
+| `D1_DATABASE_ID` | D1 データベース ID |
+
 ## Claude Code Hook 設定
 
-### 1. Hook スクリプトの配置
-
-`scripts/hook.sh` をローカルの任意の場所にコピーし、実行権限を付与する。
-
-```bash
-chmod +x /path/to/hook.sh
-```
-
-### 2. 環境変数の設定
-
-```bash
-export CCSTATS_URL="https://ccstats.example.com/api/sessions"
-export CF_ACCESS_CLIENT_ID="<your-service-token-client-id>"
-export CF_ACCESS_CLIENT_SECRET="<your-service-token-client-secret>"
-```
-
-### 3. Claude Code settings.json に Hook を登録
-
-`~/.claude/settings.json` に以下を追加:
+### 1. `~/.claude/settings.json` に環境変数と Hook を追加
 
 ```json
 {
+  "env": {
+    "CCSTATS_URL": "https://<your-workers-url>/api/sessions",
+    "CF_ACCESS_CLIENT_ID": "<your-service-token-client-id>",
+    "CF_ACCESS_CLIENT_SECRET": "<your-service-token-client-secret>"
+  },
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/hook.sh",
+            "command": "/path/to/ccstats/scripts/hook.sh",
             "timeout": 30
           }
         ]
@@ -207,46 +274,31 @@ export CF_ACCESS_CLIENT_SECRET="<your-service-token-client-secret>"
 }
 ```
 
+`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET` は省略可能（CF Access 未設定時）。
+
+### 2. Hook スクリプトに実行権限を付与
+
+```bash
+chmod +x /path/to/ccstats/scripts/hook.sh
+```
+
 ### Hook の動作
 
 1. セッション終了時に Stop Hook が発火
 2. stdin から `session_id`, `transcript_path`, `cwd` を受け取る
-3. `transcript_path` の JSONL ファイルを解析し、トークン使用量・ツール呼び出しを集計
-4. CF Access サービストークン付きで `POST /api/sessions` に送信
+3. `transcript_path` の JSONL を解析し、トークン使用量・ツール呼び出しを集計
+4. Agent は `Agent:<subagent_type>`、Skill は `Skill:<name>` に展開
+5. CF Access サービストークン付き（設定時）で `POST /api/sessions` に送信
+6. 送信失敗時は `~/.ccstats-failed.jsonl` にフォールバック保存
 
-## セットアップ
-
-### 前提条件
-
-- Node.js 18+
-- Cloudflare アカウント
-- wrangler CLI (`npm install -g wrangler`)
-
-### ローカル開発
+## 開発
 
 ```bash
-npm install
-npx wrangler d1 create ccstats-db --local
-npx wrangler d1 execute ccstats-db --local --file=src/db/schema.sql
-npx wrangler dev
+npm test              # テスト実行
+npm run test:coverage # カバレッジ付きテスト
+npm run typecheck     # 型チェック
+npm run dev           # ローカル開発サーバー
 ```
-
-### デプロイ
-
-```bash
-npx wrangler d1 create ccstats-db
-npx wrangler d1 execute ccstats-db --file=src/db/schema.sql
-npx wrangler deploy
-```
-
-### Cloudflare Access 設定
-
-1. Cloudflare Zero Trust ダッシュボードで Application を作成
-2. ドメインに `ccstats.<your-domain>` を設定
-3. サービストークンを作成（Hook 用 M2M 認証）
-4. ポリシーを設定:
-   - Service Auth: Hook スクリプト用
-   - Email: ダッシュボード閲覧用
 
 ## 設計詳細
 
